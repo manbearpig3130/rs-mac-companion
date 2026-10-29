@@ -705,6 +705,12 @@ static void *grow(void *old, size_t old_bytes, size_t new_bytes) {
     return p;
 }
 
+// Times in g_ts are seconds since the search started: now_s() counts from boot, and after a few
+// days of uptime a float of it is too coarse to measure 1 s/s (0.125 s steps after 12 days).
+static double g_ts_start;
+
+static float ts_now(void) { return (float)(now_s() - g_ts_start); }
+
 static void ts_add(uint64_t a, double v, float when) {
     if (g_ts.n == g_ts.cap) {
         size_t cap = g_ts.cap ? g_ts.cap * 2 : 1 << 18;
@@ -718,7 +724,7 @@ static void ts_add(uint64_t a, double v, float when) {
 
 static int snap_doubles(uint64_t base, const uint8_t *d, size_t len, void *ctx) {
     (void)ctx;
-    float when = (float)now_s();
+    float when = ts_now();
     for (size_t i = 0; i + 8 <= len; i += 8) {
         double v;
         memcpy(&v, d + i, 8);
@@ -739,7 +745,7 @@ static void rate_pass(uint8_t *win) {
             wlen = CHUNK;
             while (wlen >= 0x1000 && !safe_read(wbase, win, wlen)) wlen /= 2;  // shorter near a region end
             if (wlen < 0x1000) wlen = 0;
-            when = (float)now_s();
+            when = ts_now();
             if (a + 8 > wbase + wlen) continue;
         }
         double v;
@@ -768,6 +774,7 @@ static void timer_search(uint8_t *buf, unsigned gen) {
     tagset tags;
     const tagset *only = round++ % 5 != 4 ? tags_for(TAGS_TIMER, &tags) : NULL;
     double t0 = now_s();
+    g_ts_start = t0;
     uint64_t bytes = scan(buf, only, snap_doubles, NULL);
     size_t snapped = g_ts.n;
     for (int pass = 1; pass <= 3 && g_ts.n; pass++) {

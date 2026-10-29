@@ -120,6 +120,7 @@ enum { T_F32S, T_F64S, T_I32MS, T_F32MS, T_F64MS, NTYPES };
 static const char *g_tnames[NTYPES] = {"f32", "f64", "i32ms", "f32ms", "f64ms"};
 typedef struct { uint64_t *a; float *v; float *t; size_t n, cap; } tset_t;
 static tset_t g_t[NTYPES];
+static double g_tstart;  // times in g_t are seconds since the snapshot (a float of uptime is too coarse)
 
 static double now_s(void) {
     static mach_timebase_info_data_t tb;
@@ -173,12 +174,13 @@ static double tread(int type, const uint8_t *p) {
 static void snap_timers(int group) {
     static uint8_t buf[CHUNK];
     tfree_all();
+    g_tstart = now_s();
     for (int r = 0; r < g_nregions; r++)
         for (mach_vm_size_t off = 0; off < g_regions[r].s; off += CHUNK) {
             size_t len = g_regions[r].s - off < CHUNK ? g_regions[r].s - off : CHUNK;
             uint64_t base = g_regions[r].a + off;
             if (!safe_read(base, buf, len)) continue;
-            float when = (float)now_s();
+            float when = (float)(now_s() - g_tstart);
             for (size_t i = 0; i + 8 <= len; i += 4) {
                 int t0 = group == 0 ? T_F32S : T_F32MS, t1 = group == 1 ? T_F64MS : T_F64S;
                 double v;
@@ -205,7 +207,7 @@ static void rate_timers(double lo, double hi) {
                         uint64_t end = g_regions[r].a + g_regions[r].s;
                         wlen = end - wbase < CHUNK ? end - wbase : CHUNK;
                         if (!safe_read(wbase, win, wlen)) wlen = 0;
-                        when = (float)now_s();
+                        when = (float)(now_s() - g_tstart);
                         break;
                     }
                 if (!wlen || a + tsize(t) > wbase + wlen) continue;
