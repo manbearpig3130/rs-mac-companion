@@ -806,7 +806,8 @@ static void timer_search(uint8_t *buf, unsigned gen) {
 // While a song plays, the game keeps a record of its audio play event: the event name
 // "Play_<SongKey>" as a 32-byte string (inline or on the heap), then the song position as float
 // seconds (+PLAY_POS) and int32 milliseconds (+PLAY_MS). Copies from earlier plays linger with
-// their position frozen, so only a record whose milliseconds advance counts. The song timer
+// their position frozen, so only a record whose milliseconds advance counts: at any speed up to
+// a little over normal, since Riff Repeater can slow a song down to a fraction of it. The song timer
 // equals its position; this confirms the timer in songs without tone changes and checks it in
 // every song (a confirmed timer can be freed, and a clock started with the song can pass the
 // banner check).
@@ -878,7 +879,7 @@ static double play_position(uint8_t *buf, banner_search *bs, ptrs_search *ps, co
     usleep(300000);
     for (int i = 0; i < n; i++) {
         int32_t ms1 = ms0[i] < 0 ? -1 : play_ms(recs[i], texts[i], len);
-        if (ms1 - ms0[i] < 200 || ms1 - ms0[i] > 400) continue;
+        if (ms1 - ms0[i] <= 0 || ms1 - ms0[i] > 400) continue;
         tags_learn(TAGS_PLAY, recs[i]);
         if (texts[i] != recs[i]) tags_learn(TAGS_PLAY, texts[i]);
         return ms1 / 1000.0;

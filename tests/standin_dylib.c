@@ -17,6 +17,8 @@
 // "unseen" is "notones" with two more starts: at e = 20 s Self Trap is restarted (timer and play
 // record from 0 again), and at e = 32 s another song starts without the game reading its files
 // (the timer runs from 0 again, Self Trap's play record stops).
+// "slow" is "notones" with a Riff Repeater loop at 40% speed: at e = 25 s the song goes back from
+// 20 s to 8 s, and from there the timer and play record advance 0.4 s per second.
 // Built as x86_64, so it runs under Rosetta like the real game.
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
@@ -77,11 +79,12 @@ static void *arrangement(uint64_t vtable, const char *name) {
 
 int main(int argc, char **argv) {
     if (argc != 4 && argc != 5) {
-        fprintf(stderr, "usage: rs-standin-dylib <archive> <sng offset> <audio offset> [notones|unseen]\n");
+        fprintf(stderr, "usage: rs-standin-dylib <archive> <sng offset> <audio offset> [notones|unseen|slow]\n");
         return 2;
     }
     int unseen = argc == 5 && !strcmp(argv[4], "unseen");
-    int notones = unseen || (argc == 5 && !strcmp(argv[4], "notones"));
+    int slow = argc == 5 && !strcmp(argv[4], "slow");
+    int notones = unseen || slow || (argc == 5 && !strcmp(argv[4], "notones"));
     uint64_t slide = 0;
     for (uint32_t i = 0; i < _dyld_image_count(); i++)
         if (_dyld_get_image_header(i)->filetype == MH_EXECUTE) slide = (uint64_t)_dyld_get_image_vmaddr_slide(i);
@@ -133,6 +136,7 @@ int main(int argc, char **argv) {
             *picked = e < 3 ? 0.0 : e - 3;
             if (unseen && e >= 32) *song = e - 32;
             else if (unseen && e >= 20) *song = e - 20;
+            else if (slow && e >= 25) *song = 8 + (e - 25) * 0.4;
             else *song = e < 5 ? 0.0 : e - 5;
             if (!rec && e >= 5) {
                 g_objects[9] = rec = play_record("Play_SelfTrap", 0);

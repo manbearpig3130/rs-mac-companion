@@ -1,6 +1,6 @@
 #!/bin/sh
 # End-to-end test of the in-game dylib (native/rscompanion.c) without the game, against
-# tests/standin_dylib.c (two runs of about 60 s, one of 30 s and one of 55 s), with tools/event_listener.py receiving the
+# tests/standin_dylib.c (two runs of about 60 s, one of 30 s, one of 55 s and one of 60 s), with tools/event_listener.py receiving the
 # events on the socket as the companion app would. Checks:
 #   - the song is detected from the stand-in's file reads of the game's own songs.psarc (Self
 #     Trap, which comes with the game), the selected arrangement is picked (not a stale one), and
@@ -21,7 +21,10 @@
 #     dropped (heartbeats without a song),
 #   - run 5: run 1's song with no app listening for the first 12 s: the dylib pauses its memory
 #     scans (none before the listener appears), then finds the arrangement and reports the same
-#     tones on time.
+#     tones on time,
+#   - run 6 (stand-in "slow"): run 3's song goes back to an earlier point and plays on at 40% speed,
+#     as in Riff Repeater: the play record, advancing slower, still shows the song playing, so
+#     tone changes go on and the song is not dropped.
 # Needs the game installed (songs.psarc). Everything goes to a temporary folder, so your own data
 # is not touched.
 set -e
@@ -40,12 +43,13 @@ mkdir -p "$DATA"
 STANDIN= LISTENER=
 trap 'kill $STANDIN $LISTENER 2>/dev/null || true; wait 2>/dev/null; rm -rf "$HOME_DIR"' EXIT
 
-for RUN in 1 2 3 4 5; do
+for RUN in 1 2 3 4 5 6; do
   LOG="$DATA/rscompanion.log" EVENTS="$DATA/events.jsonl"
   rm -f "$LOG" "$EVENTS"
   [ $RUN = 2 ] && echo '{"lead_ms": 500}' > "$DATA/rscompanion.json"
   [ $RUN = 3 ] && echo '{"lead_ms": 500, "overlay_enabled": true}' > "$DATA/rscompanion.json"
   [ $RUN = 4 ] && echo '{"lead_ms": 500}' > "$DATA/rscompanion.json"
+  [ $RUN = 6 ] && echo '{"lead_ms": 500}' > "$DATA/rscompanion.json"
   [ $RUN = 5 ] && rm -f "$DATA/rscompanion.json" "$DATA/events.sock"
   listen() {
     python3 tools/event_listener.py --socket "$DATA/events.sock" --out "$EVENTS" > /dev/null 2>&1 &
@@ -53,7 +57,7 @@ for RUN in 1 2 3 4 5; do
   }
   [ $RUN != 5 ] && listen && sleep 1
   HOME="$HOME_DIR" DYLD_INSERT_LIBRARIES="$PWD/build/librscompanion.dylib" \
-    build/rs-standin-dylib "$ARCHIVE" "$SNG" "$AUDIO" $([ $RUN = 3 ] && echo notones) $([ $RUN = 4 ] && echo unseen) &
+    build/rs-standin-dylib "$ARCHIVE" "$SNG" "$AUDIO" $([ $RUN = 3 ] && echo notones) $([ $RUN = 4 ] && echo unseen) $([ $RUN = 6 ] && echo slow) &
   STANDIN=$!
   [ $RUN = 5 ] && sleep 12 && listen && sleep 48
   case $RUN in 3) sleep 30 ;; 4) sleep 55 ;; 5) ;; *) sleep 60 ;; esac
@@ -86,6 +90,25 @@ if run == 4:
     if not with_song or last.get("song") or not 35 <= len(with_song) <= 50 \
             or with_song != list(range(with_song[0], with_song[-1] + 1)):
         problems.append("heartbeats: expected the song until it is dropped (~42-48 s), none after")
+    for p in problems:
+        print("   FAIL:", p)
+    print(f"run {run}:", "FAIL" if problems else "PASS")
+    sys.exit(1 if problems else 0)
+
+if run == 6:
+    at = lambda text: next((i for i, l in enumerate(lines) if text in l), None)
+    lock, back = at("play record: song timer is the double"), at("song timer went back")
+    goes_on, dropped = at("play record shows SelfTrap playing"), at("no live play record of SelfTrap")
+    print(f"   log lines: lock {lock}, timer back {back}, play record goes on {goes_on}, dropped {dropped}")
+    if None in (lock, back, goes_on) or dropped is not None or not lock < back < goes_on:
+        problems.append("log: expected lock, timer back (Riff Repeater), play record goes on, not dropped")
+    states = [e for e in events if e["event"] == "state"]
+    last = states[-1] if states else {}
+    print(f"   {len(states)} heartbeats; last: song {last.get('song')!r}, time {last.get('time')}")
+    # Back to 8 s at e = 25 s, then 0.4 s a second: ~22 s at the end of the 60 s run. Before the
+    # fix, the song was dropped at ~18 s (10 s on from where it went back).
+    if last.get("song") != "Self Trap" or not 20 <= (last.get("time") or 0) <= 24:
+        problems.append("heartbeats: expected the song to the end, at the slowed song time")
     for p in problems:
         print("   FAIL:", p)
     print(f"run {run}:", "FAIL" if problems else "PASS")
